@@ -513,7 +513,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         if self.repo:
             group_before = self.repo.spec.tool.poetry.group.get(repo_group, Group())
             await self.repo.poetry_add(
-                package=package,
+                package,
                 group=repo_group,
                 editable=editable,
                 extras=extras,
