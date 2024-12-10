@@ -49,6 +49,7 @@ class BaseProject(Generic[SpecT]):
         self.root = self.filepath.parent
         # Read raw content of spec
         self._raw = self.read(self.filepath)
+        print(self.filepath)
         # Parse spec
         self._spec = self.__SPEC__.parse_obj(self._raw)
 

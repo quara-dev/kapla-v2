@@ -721,7 +721,12 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             if git_infos.commit:
                 cmd.add_option("--label", f"git.commit={git_infos.commit}")
             # Add tag
-            cmd.add_option("--tag", ":".join([spec.image + suffix, tag]))
+            if spec.images is not None:
+                for image in spec.images:
+                    cmd.add_option("--tag", ":".join([image + suffix, tag]))
+            elif spec.image is not None:
+                cmd.add_option("--tag", ":".join([spec.image + suffix, tag]))
+
             for tag in additional_tags or []:
                 cmd.add_option("--tag", ":".join([spec.image + suffix, tag]))
             if load:

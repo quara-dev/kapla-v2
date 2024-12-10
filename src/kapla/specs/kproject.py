@@ -6,7 +6,8 @@ from .pyproject import DepedencyMeta
 
 
 class DockerSpec(AliasedModel):
-    image: str
+    images: Optional[List[str]]
+    image: Optional[str]
     base_image: Optional[str] = None
     template: Optional[str] = None
     options: Optional[Mapping[str, Any]] = None
