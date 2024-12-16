@@ -5,8 +5,11 @@ from .common import BasePythonConfig
 from .pyproject import DepedencyMeta
 
 
+class DockerImageSpec(AliasedModel):
+    name: str
+    template:str
 class DockerSpec(AliasedModel):
-    images: Optional[List[str]]
+    images: Optional[List[DockerImageSpec]]
     image: Optional[str]
     base_image: Optional[str] = None
     template: Optional[str] = None
