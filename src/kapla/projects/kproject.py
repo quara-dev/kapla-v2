@@ -681,6 +681,9 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             )]
         else:
             images = []
+        nb_images = len(images)
+        logger.info(f"list images {nb_images}")
+
         for image in images:
             logger.info(f"Building image {image.name}, template {image.template}")
             # Gather tag
