@@ -154,7 +154,7 @@ class KRepo(BaseKRepo):
             for workspace_directory in all_workspaces[name]:
                 # Find files named "project.yml" or "project.yaml" starting from the workspace
                 for filepath in find_files_using_gitignore(
-                    ("project.yml", "project.yaml"),
+                    ("project.yml", "project.yaml", "project_encrypted.yml",  "project_encrypted.yaml"),
                     root=workspace_directory,
                 ):
                     # Create a new instance of KProject
