@@ -682,6 +682,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         else:
             images = []
         for image in images:
+            logger.info(f"Building image {image.name}, template {image.template}")
             # Gather tag
             tag = tag or await self.get_docker_tag(git_infos)
             template = image.template or "library"
