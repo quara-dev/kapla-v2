@@ -16,10 +16,10 @@ def configure_logger(level: Optional[int] = None) -> None:
     # Check that the logging level exists
     # Optionally fetch logging level from environment variable
     if level is not None:
-        level_ : int = level
+        level_: int = level
     else:
         level_str = os.environ.get("LOGGING_LEVEL", NOTSET)
-        level_ : int= logging.getLevelName(level_str)
+        level_: int = logging.getLevelName(level_str)
         if not isinstance(level, int):
             raise ValueError(f"Logging level not supported: {level_}")
     structlog.configure(
