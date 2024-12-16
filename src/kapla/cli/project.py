@@ -193,7 +193,7 @@ def do_build_docker(args: Any) -> None:
             logger.error(f"Tags file {tags_filepath} does not exist")
             sys.exit(1)
         tag, *additional_tags = json.loads(tags_filepath.read_text())
-    docker_func = partial(
+    docker_funcs = partial(
         project.build_docker,
         tag=tag,
         additional_tags=additional_tags,
@@ -210,7 +210,8 @@ def do_build_docker(args: Any) -> None:
     )
 
     try:
-        run(docker_func)
+        for docker_func in docker_funcs:
+            run(docker_func)
     except CommandFailedError:
         logger.error("Build failed")
         sys.exit(1)

@@ -659,9 +659,10 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
         **kwargs: Any,
-    ) -> Command:
+    ) -> List[Command]:
         """Build docker image for the projcet according to the project spec."""
         suffix = suffix or ""
+        cmds : List[Command] = []
         # Gather deadline
         deadline = get_deadline(timeout, deadline)
         kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
@@ -793,10 +794,10 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                             shutil.copy2(filepath, dist_root)
                 logger.warning("Invoking docker command", command=cmd.cmd)
                 # Run docker build command
-                return await cmd.run()
+                cmds.append(await cmd.run())
             finally:
                 Path(self.root, "Dockerfile").unlink(missing_ok=True)
-
+        return cmds
     def clean(self) -> None:
         """Remove well-known non versioned files"""
         # Remove venv
