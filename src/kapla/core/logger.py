@@ -15,11 +15,13 @@ def configure_logger(level: Optional[int] = None) -> None:
     """
     # Check that the logging level exists
     # Optionally fetch logging level from environment variable
-    if level is None:
+    if level is not None:
+        level_ = level
+    else:
         level_str = os.environ.get("LOGGING_LEVEL", NOTSET)
-        level = logging.getLevelName(level_str)
+        level_ = logging.getLevelName(level_str)
         if not isinstance(level, int):
-            raise ValueError(f"Logging level not supported: {level}")
+            raise ValueError(f"Logging level not supported: {level_}")
     structlog.configure(
         processors=[
             structlog.processors.add_log_level,
@@ -28,7 +30,7 @@ def configure_logger(level: Optional[int] = None) -> None:
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             structlog.dev.ConsoleRenderer(),
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(level),
+        wrapper_class=structlog.make_filtering_bound_logger(level_),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=False,
