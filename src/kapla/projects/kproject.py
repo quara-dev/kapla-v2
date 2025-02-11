@@ -39,9 +39,9 @@ from ..core.finder import find_dirs, find_files
 from ..core.io import read_yaml, write_toml, write_yaml
 from ..core.logger import logger
 from ..core.templates import render_template
+from ..specs.kproject import DockerImageSpec, DockerSpec
 from .base import BasePythonProject
 from .pyproject import KPyProject
-from ..specs.kproject import DockerImageSpec
 
 if TYPE_CHECKING:
     from .krepo import KRepo
@@ -112,7 +112,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
     def is_already_installed(self) -> bool:
         if self.repo:
             for _ in find_files(
-                f"{self.name.replace('-','_').lower()}.pth",
+                f"{self.name.replace('-', '_').lower()}.pth",
                 root=self.venv_path,
                 ignore=[
                     "bin/",
@@ -660,10 +660,9 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         deadline: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Command]:
-        """Build docker image for the projcet according to the project spec."""
+        """Build docker image for the project according to the project spec."""
         suffix = suffix or ""
-        cmds : List[Command] = []
-        # Gather deadline
+        cmds: List[Command] = []
         deadline = get_deadline(timeout, deadline)
         kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
         spec = self.spec.docker
@@ -671,133 +670,209 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             raise ValueError("No docker spec found for project")
         if not self.repo:
             raise ValueError("Cannot build docker images without parent repo")
-        # Gather git infos
         git_infos = await self.get_git_infos()
-        if spec.images is not None:
-            images = spec.images
-        elif spec.image is not None:
-            images = [DockerImageSpec(
-                name=spec.image,
-                template=spec.template,
-            )]
-        else:
-            images = []
-        nb_images = len(images)
-        logger.info(f"list images {nb_images}")
+        images = self._get_images(spec)
 
         for image in images:
             logger.info(f"Building image {image.name}, template {image.template}")
-            # Gather tag
             tag = tag or await self.get_docker_tag(git_infos)
-            template = image.template or "library"
-            template_args = spec.options or {}
-            template_file = "Dockerfile." + template
-            template_path = self.repo.root / ".repo/templates/dockerfiles" / template_file
+            self._render_template(image, spec)
             try:
-                render_template(template_path, self.root / "Dockerfile", **template_args)
-                cmd = Command(
-                    "docker buildx build", deadline=deadline, quiet=quiet, **kwargs
-                )
-                _build_args = spec.build_args.copy() if spec.build_args else {}
-                if build_args:
-                    _build_args.update(build_args)
-                build_args = _build_args.copy()
-                if spec.base_image and "BASE_IMAGE" not in build_args:
-                    if ":" not in spec.base_image:
-                        base_image = spec.base_image + ":" + tag
-                    else:
-                        base_image = spec.base_image
-                    build_args["BASE_IMAGE"] = base_image
-                build_args["PACKAGE_NAME"] = self.name
-                build_args["PACKAGE_VERSION"] = self.version
-                if git_infos.commit:
-                    build_args["GIT_COMMIT"] = git_infos.commit
-                if git_infos.branch:
-                    build_args["GIT_BRANCH"] = git_infos.branch
-                if git_infos.tag:
-                    build_args["GIT_TAG"] = git_infos.tag
-                # Add build args
-                logger.warning("Using build args", build_args=build_args)
-                for key, value in build_args.items():
-                    cmd.add_option("--build-arg", "=".join([key, value]), escape=True)
-                # Add labels
-                cmd.add_repeat_option("--label", spec.labels)
-                cmd.add_repeat_option(
-                    "--label",
-                    [
-                        f"quara.package.version={self.version}",
-                        f"quara.package.name={self.name}",
-                    ],
-                )
-                # Add git infos as labels
-                if git_infos.tag:
-                    cmd.add_option("--label", f"git.tag.name={git_infos.tag}")
-                if git_infos.branch:
-                    cmd.add_option("--label", f"git.branch.name={git_infos.branch}")
-                if git_infos.commit:
-                    cmd.add_option("--label", f"git.commit={git_infos.commit}")
-                images = []
-                # Add tag
-
-
-                cmd.add_option("--tag", ":".join([image.name + suffix, tag]))
-                for tag in additional_tags or []:
-                    cmd.add_option("--tag", ":".join([image.name + suffix, tag]))
-                if load:
-                    cmd.add_option("--load")
-                if push:
-                    cmd.add_option("--push")
-                if output_dir is not None:
-                    cmd.add_option(
-                        "--output",
-                        "type=local,dest=" + Path(self.root, output_dir).as_posix(),
-                    )
-                cmd.add_option(
-                    "--metadata-file",
-                    Path(
-                        self.root,
-                        "dist",
-                        "-".join([self.name, self.version]) + ".docker-metadata",
-                    ).as_posix(),
-                )
-                if platforms:
-                    platform = list(platforms)
-                else:
-                    platform = spec.platforms
-                if platform:
-                    cmd.add_repeat_option("--platform", platform)
-                # Only add option when set to False, because defaut behaviour is to add provenance on latest buildx versions
-                if provenance is False:
-                    cmd.add_option("--provenance", "false")
-                cmd.add_argument(
-                    Path(self.root, spec.context).resolve(True).as_posix()
-                    if spec.context
-                    else self.root.as_posix()
+                cmd = self._create_docker_command(
+                    image,
+                    tag,
+                    suffix,
+                    spec,
+                    git_infos,
+                    build_args,
+                    deadline,
+                    quiet,
+                    load,
+                    push,
+                    output_dir,
+                    platforms,
+                    provenance,
+                    additional_tags,
+                    **kwargs,
                 )
                 if build_dist:
-                    # Make sure sources are built before actually running the command
-                    await self.build(
-                        env=build_dist_env,
-                        build_system=build_dist_system,
-                        lock_versions=lock_versions,
-                        quiet=True,
-                        deadline=deadline,
+                    await self._build_dist(
+                        build_dist_env,
+                        build_dist_system,
+                        lock_versions,
+                        deadline,
                         **kwargs,
                     )
-                    # Copy dist into project dist
-                    dist_root = self.root / "dist"
-                    dist_root.mkdir(exist_ok=True, parents=False)
-                    for dep in self.repo.list_projects(include=[self.name]):
-                        if dep.name == self.name:
-                            continue
-                        for filepath in Path(dep.root, "dist").glob("*.whl"):
-                            shutil.copy2(filepath, dist_root)
                 logger.warning("Invoking docker command", command=cmd.cmd)
-                # Run docker build command
                 cmds.append(await cmd.run())
             finally:
                 Path(self.root, "Dockerfile").unlink(missing_ok=True)
         return cmds
+
+    def _get_images(self, spec: DockerSpec) -> List[DockerImageSpec]:
+        if spec.images is not None:
+            return spec.images
+        elif spec.image is not None:
+            return [DockerImageSpec(name=spec.image, template=spec.template)]
+        else:
+            return []
+
+    def _render_template(self, image: DockerImageSpec, spec: DockerSpec) -> None:
+        template = image.template or "library"
+        template_args = spec.options or {}
+        template_file = "Dockerfile." + template
+        assert self.repo
+        template_path = self.repo.root / ".repo/templates/dockerfiles" / template_file
+
+        render_template(template_path, self.root / "Dockerfile", **template_args)
+
+    def _create_docker_command(
+        self,
+        image: DockerImageSpec,
+        tag: str,
+        suffix: str,
+        spec: DockerSpec,
+        git_infos: GitInfos,
+        build_args: Optional[Dict[str, str]],
+        deadline: Optional[float],
+        quiet: bool,
+        load: bool,
+        push: bool,
+        output_dir: Union[str, Path, None],
+        platforms: Optional[List[str]],
+        provenance: bool,
+        additional_tags: Optional[Iterable[str]],
+        **kwargs: Any,
+    ) -> Command:
+        cmd = Command("docker buildx build", deadline=deadline, quiet=quiet, **kwargs)
+        build_args = self._prepare_build_args(spec, git_infos, build_args, tag)
+        logger.warning("Using build args", build_args=build_args)
+        for key, value in build_args.items():
+            cmd.add_option("--build-arg", "=".join([key, value]), escape=True)
+        cmd.add_repeat_option("--label", spec.labels)
+        cmd.add_repeat_option(
+            "--label",
+            [
+                f"quara.package.version={self.version}",
+                f"quara.package.name={self.name}",
+            ],
+        )
+        self._add_git_labels(cmd, git_infos)
+        cmd.add_option("--tag", ":".join([image.name + suffix, tag]))
+        self._add_additional_tags(cmd, image, suffix, additional_tags)
+        self._add_optional_options(
+            cmd, load, push, output_dir, platforms, provenance, spec
+        )
+        cmd.add_argument(
+            Path(self.root, spec.context).resolve(True).as_posix()
+            if spec.context
+            else self.root.as_posix()
+        )
+        return cmd
+
+    def _prepare_build_args(
+        self,
+        spec: DockerSpec,
+        git_infos: GitInfos,
+        build_args: Optional[Dict[str, str]],
+        tag: str,
+    ) -> Dict[str, str]:
+        _build_args = spec.build_args.copy() if spec.build_args else {}
+        if build_args:
+            _build_args.update(build_args)
+        build_args = _build_args.copy()
+        if spec.base_image and "BASE_IMAGE" not in build_args:
+            base_image = (
+                spec.base_image + ":" + tag
+                if ":" not in spec.base_image
+                else spec.base_image
+            )
+            build_args["BASE_IMAGE"] = base_image
+        build_args["PACKAGE_NAME"] = self.name
+        build_args["PACKAGE_VERSION"] = self.version
+        if git_infos.commit:
+            build_args["GIT_COMMIT"] = git_infos.commit
+        if git_infos.branch:
+            build_args["GIT_BRANCH"] = git_infos.branch
+        if git_infos.tag:
+            build_args["GIT_TAG"] = git_infos.tag
+        return build_args
+
+    def _add_git_labels(self, cmd: Command, git_infos: GitInfos) -> None:
+        if git_infos.tag:
+            cmd.add_option("--label", f"git.tag.name={git_infos.tag}")
+        if git_infos.branch:
+            cmd.add_option("--label", f"git.branch.name={git_infos.branch}")
+        if git_infos.commit:
+            cmd.add_option("--label", f"git.commit={git_infos.commit}")
+
+    def _add_additional_tags(
+        self,
+        cmd: Command,
+        image: DockerImageSpec,
+        suffix: str,
+        additional_tags: Optional[Iterable[str]],
+    ) -> None:
+        for tag in additional_tags or []:
+            cmd.add_option("--tag", ":".join([image.name + suffix, tag]))
+
+    def _add_optional_options(
+        self,
+        cmd: Command,
+        load: bool,
+        push: bool,
+        output_dir: Union[str, Path, None],
+        platforms: Optional[List[str]],
+        provenance: bool,
+        spec: DockerSpec,
+    ) -> None:
+        if load:
+            cmd.add_option("--load")
+        if push:
+            cmd.add_option("--push")
+        if output_dir is not None:
+            cmd.add_option(
+                "--output", "type=local,dest=" + Path(self.root, output_dir).as_posix()
+            )
+        cmd.add_option(
+            "--metadata-file",
+            Path(
+                self.root,
+                "dist",
+                "-".join([self.name, self.version]) + ".docker-metadata",
+            ).as_posix(),
+        )
+        platform = platforms if platforms else spec.platforms
+        if platform:
+            cmd.add_repeat_option("--platform", platform)
+        if provenance is False:
+            cmd.add_option("--provenance", "false")
+
+    async def _build_dist(
+        self,
+        build_dist_env: Optional[Dict[str, str]],
+        build_dist_system: BuildSystem,
+        lock_versions: bool,
+        deadline: Optional[float],
+        **kwargs: Any,
+    ) -> None:
+        await self.build(
+            env=build_dist_env,
+            build_system=build_dist_system,
+            lock_versions=lock_versions,
+            quiet=True,
+            deadline=deadline,
+            **kwargs,
+        )
+        dist_root = self.root / "dist"
+        dist_root.mkdir(exist_ok=True, parents=False)
+        assert self.repo
+        for dep in self.repo.list_projects(include=[self.name]):
+            if dep.name == self.name:
+                continue
+            for filepath in Path(dep.root, "dist").glob("*.whl"):
+                shutil.copy2(filepath, dist_root)
+
     def clean(self) -> None:
         """Remove well-known non versioned files"""
         # Remove venv
