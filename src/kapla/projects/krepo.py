@@ -533,7 +533,6 @@ class KRepo(BaseKRepo):
                                     clean=False,
                                 )
                                 if cmd:
-                                    nonlocal results
                                     results.append(cmd)
 
                         # Kick off install
@@ -619,7 +618,6 @@ class KRepo(BaseKRepo):
                             clean=clean,
                             recurse=False,
                         )
-                        nonlocal results
                         results.append(cmd)
                         wheels = list(Path(project.root / "dist").glob("*.whl"))
                         logger.info(
