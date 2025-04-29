@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
+    DefaultDict,
     Dict,
     Iterable,
     Iterator,
@@ -27,6 +28,7 @@ from kapla.specs.kproject import KProjectSpec
 from kapla.specs.pyproject import (
     DEFAULT_BUILD_SYSTEM,
     Dependency,
+    DependencyMeta,
     Group,
     PoetryConfig,
     PyProjectSpec,
@@ -189,99 +191,236 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         dependencies: Dict[str, Dependency] = {}
         groups: Dict[str, Group] = {}
         extras: Dict[str, List[str]] = {}
-        # Fetch constraints
+
         constraints: Dict[str, str]
         if self.repo is None:
             constraints = defaultdict(lambda: "*")
         else:
             constraints = self.repo.get_packages_constraints()
-        # Iterate over dependencies and replace version
+
+        self._process_main_dependencies(dependencies, constraints, lock_versions)
+        self._process_extras_and_groups(
+            dependencies, extras, groups, constraints, lock_versions
+        )
+        self._handle_python_dependency(dependencies, include_python)
+        self._remove_local_dependencies(dependencies, include_local)
+        return dependencies, extras, groups
+
+    def _process_main_dependencies(
+        self,
+        dependencies: Dict[str, Dependency],
+        constraints: Union[DefaultDict[str, str], Dict[str, str]],
+        lock_versions: bool,
+    ) -> None:
         for dep in self.spec.dependencies:
-            if isinstance(dep, str):
-                if lock_versions:
-                    locked_version = self.get_locked_version(dep)
-                else:
-                    locked_version = constraints.get(dep, "*")
-                dependencies[dep] = Dependency(version=locked_version)
-            else:
-                for key, value in dep.items():
-                    if lock_versions:
-                        locked_version = self.get_locked_version(key)
-                    else:
-                        locked_version = constraints.get(key, "*")
-                    dependencies[key] = Dependency.parse_obj(
-                        {
-                            **value.dict(exclude_unset=True, by_alias=True),
-                            "version": locked_version,
-                        }
+            self._lock_and_store_dependencies(
+                lock_versions, dependencies, constraints, dep
+            )
+            local_dependencies = self._get_local_dependency_names(dep)
+            self._process_secondary_dependencies(
+                local_dependencies, dependencies, constraints, lock_versions
+            )
+
+    def _get_local_dependency_names(
+        self, dep: Union[str, Dict[str, DependencyMeta]]
+    ) -> List[str]:
+        """Extract dependency names from a dependency specification."""
+        return [dep] if isinstance(dep, str) else list(dep.keys())
+
+    def _process_secondary_dependencies(
+        self,
+        local_dependencies: List[str],
+        dependencies: Dict[str, Dependency],
+        constraints: Union[DefaultDict[str, str], Dict[str, str]],
+        lock_versions: bool,
+    ) -> None:
+        """Process secondary dependencies of the given local dependencies."""
+        if not self.repo:
+            return
+
+        for dep_name in local_dependencies:
+            locked_package = self.repo.packages_lock.packages.get(dep_name)
+            if locked_package and locked_package.dependencies:
+                visited: Set[str] = set()
+                for secondary_dep in locked_package.dependencies:
+                    self._process_dependency_tree(
+                        secondary_dep, visited, dependencies, constraints, lock_versions
                     )
-        # Iterate over extra dependencies and replace version
+
+    def _process_dependency_tree(
+        self,
+        dep_name: str,
+        visited: Set[str],
+        dependencies: Dict[str, Dependency],
+        constraints: Union[DefaultDict[str, str], Dict[str, str]],
+        lock_versions: bool,
+    ) -> None:
+        """Process a dependency and its subdependencies recursively."""
+        if dep_name in visited:
+            return
+        visited.add(dep_name)
+
+        self._lock_and_store_dependencies(
+            lock_versions, dependencies, constraints, dep_name
+        )
+
+        if not self.repo:
+            return
+
+        locked_package = self.repo.packages_lock.packages.get(dep_name)
+        if locked_package and locked_package.dependencies:
+            for sub_dep in locked_package.dependencies:
+                self._process_dependency_tree(
+                    sub_dep, visited, dependencies, constraints, lock_versions
+                )
+
+    def _process_extras_and_groups(
+        self,
+        dependencies: Dict[str, Dependency],
+        extras: Dict[str, List[str]],
+        groups: Dict[str, Group],
+        constraints: Union[DefaultDict[str, str], Dict[str, str]],
+        lock_versions: bool,
+    ) -> None:
         for group_name, group_dependencies in self.spec.extras.items():
-            # Let's create a group and an extra
             groups[group_name] = Group(dependencies={})
             extras[group_name] = []
-            # Iterate over dependencies and replace version
+            visited: Set[str] = set()
             for dep in group_dependencies:
                 if isinstance(dep, str):
-                    if lock_versions:
-                        locked_version = self.get_locked_version(dep)
-                    else:
-                        locked_version = constraints.get(dep, "*")
-                    # Add dependency to group
-                    groups[group_name].dependencies[dep] = Dependency(
-                        version=locked_version
+                    self._add_dependency_to_group(
+                        dep,
+                        group_name,
+                        dependencies,
+                        extras,
+                        groups,
+                        constraints,
+                        lock_versions,
+                        visited,
                     )
-                    # Add dependency to extra
-                    if dep not in extras[group_name]:
-                        extras[group_name].append(dep)
-                    # Add dependency to optional dependencies
-                    if dep not in dependencies:
-                        dependencies[dep] = Dependency.parse_obj(
-                            {
-                                "version": locked_version,
-                                "optional": True,
-                            }
-                        )
                 else:
                     for key, value in dep.items():
-                        if lock_versions:
-                            locked_version = self.get_locked_version(key)
-                        else:
-                            locked_version = constraints.get(key, "*")
-                        # Add dependency to group
-                        groups[group_name].dependencies[key] = Dependency.parse_obj(
-                            {
-                                **value.dict(exclude_unset=True, by_alias=True),
-                                "version": locked_version,
-                            }
+                        self._add_dependency_to_group(
+                            key,
+                            group_name,
+                            dependencies,
+                            extras,
+                            groups,
+                            constraints,
+                            lock_versions,
+                            visited,
+                            value,
                         )
-                        # Add dependency to extra
-                        if key not in extras[group_name]:
-                            extras[group_name].append(key)
-                        # Add dependency to optional dependencies
-                        if key not in dependencies:
-                            dependencies[key] = Dependency.parse_obj(
-                                {
-                                    **value.dict(exclude_unset=True, by_alias=True),
-                                    "version": locked_version,
-                                    "optional": True,
-                                }
-                            )
-        # Make sure python dependency is set
+
+    def _add_dependency_to_group(
+        self,
+        dep_name: str,
+        group_name: str,
+        dependencies: Dict[str, Dependency],
+        extras: Dict[str, List[str]],
+        groups: Dict[str, Group],
+        constraints: Union[DefaultDict[str, str], Dict[str, str]],
+        lock_versions: bool,
+        visited: Optional[Set[str]] = None,
+        value: Optional[DependencyMeta] = None,
+    ) -> None:
+        if visited is None:
+            visited = set()
+        if dep_name in visited:
+            return
+        visited.add(dep_name)
+        locked_version = (
+            self.get_locked_version(dep_name)
+            if lock_versions
+            else constraints.get(dep_name, "*")
+        )
+        dep_obj = (
+            Dependency.parse_obj(
+                {
+                    **value.dict(exclude_unset=True, by_alias=True),
+                    "version": locked_version,
+                }
+            )
+            if value
+            else Dependency(version=locked_version)
+        )
+        groups[group_name].dependencies[dep_name] = dep_obj
+        if dep_name not in extras[group_name]:
+            extras[group_name].append(dep_name)
+        if dep_name not in dependencies:
+            dep_dict = (
+                {
+                    **value.dict(exclude_unset=True, by_alias=True),
+                    "version": locked_version,
+                    "optional": True,
+                }
+                if value
+                else {"version": locked_version, "optional": True}
+            )
+            dependencies[dep_name] = Dependency.parse_obj(dep_dict)
+        if self.repo:
+            locked_package = self.repo.packages_lock.packages.get(dep_name)
+            if locked_package and locked_package.dependencies:
+                for sub_dep in locked_package.dependencies:
+                    self._add_dependency_to_group(
+                        sub_dep,
+                        group_name,
+                        dependencies,
+                        extras,
+                        groups,
+                        constraints,
+                        lock_versions,
+                        visited,
+                    )
+
+    def _handle_python_dependency(
+        self,
+        dependencies: Dict[str, Dependency],
+        include_python: bool,
+    ) -> None:
         if include_python:
-            if "python" not in dependencies:
-                if self.repo:
-                    python_dep = self.repo.get_dependency("python")
-                    if python_dep:
-                        dependencies["python"] = python_dep.copy()
+            if "python" not in dependencies and self.repo:
+                python_dep = self.repo.get_dependency("python")
+                if python_dep:
+                    dependencies["python"] = python_dep.copy()
         else:
             dependencies.pop("python", None)
-        # Remove local deps
+
+    def _remove_local_dependencies(
+        self,
+        dependencies: Dict[str, Dependency],
+        include_local: bool,
+    ) -> None:
         if not include_local:
             for dep in self.get_local_dependencies_names():
-                dependencies.pop(dep)
-        # Return values
-        return dependencies, extras, groups
+                dependencies.pop(dep, None)
+
+    def _lock_and_store_dependencies(
+        self,
+        lock_versions: bool,
+        dependencies: Dict[str, Dependency],
+        constraints: Union[DefaultDict[str, str], Dict[str, str]],
+        dep: Union[str, Dict[str, DependencyMeta]],
+    ) -> None:
+        if isinstance(dep, str):
+            if lock_versions:
+                locked_version = self.get_locked_version(dep)
+            else:
+                locked_version = constraints.get(dep, "*")
+
+            dependencies[dep] = Dependency(version=locked_version)
+        else:
+            for key, value in dep.items():
+                if lock_versions:
+                    locked_version = self.get_locked_version(key)
+                else:
+                    locked_version = constraints.get(key, "*")
+                dependencies[key] = Dependency.parse_obj(
+                    {
+                        **value.dict(exclude_unset=True, by_alias=True),
+                        "version": locked_version,
+                    }
+                )
 
     def get_locked_version(self, package: str) -> str:
         if self.repo:

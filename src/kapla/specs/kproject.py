@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Mapping, Optional, Union
 
 from .base import AliasedModel
 from .common import BasePythonConfig
-from .pyproject import DepedencyMeta
+from .pyproject import DependencyMeta
 
 
 class DockerImageSpec(AliasedModel):
@@ -26,7 +26,7 @@ class DockerSpec(AliasedModel):
 class KProjectSpec(BasePythonConfig):
     # Docs: <https://python-poetry.org/docs/pyproject/#version>
     version: Optional[str] = None
-    dependencies: List[Union[str, Dict[str, DepedencyMeta]]] = []
+    dependencies: List[Union[str, Dict[str, DependencyMeta]]] = []
     docker: Optional[DockerSpec] = None
     # Docs: <https://python-poetry.org/docs/pyproject/#extras>
-    extras: Dict[str, List[Union[str, Dict[str, DepedencyMeta]]]] = {}
+    extras: Dict[str, List[Union[str, Dict[str, DependencyMeta]]]] = {}

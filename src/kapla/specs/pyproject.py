@@ -8,7 +8,7 @@ from .base import AliasedModel
 from .common import BasePythonConfig, BuildSystem
 
 
-class DepedencyMeta(AliasedModel):
+class DependencyMeta(AliasedModel):
     path: Optional[str] = None
     develop: Optional[bool] = None
     optional: Optional[bool] = None
@@ -24,7 +24,7 @@ class DepedencyMeta(AliasedModel):
         extra = "allow"
 
 
-class Dependency(DepedencyMeta):
+class Dependency(DependencyMeta):
     """A dependency found in a pyproject.toml file.
 
     Dependencies can be found in:
