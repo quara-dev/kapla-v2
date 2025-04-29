@@ -154,7 +154,12 @@ class KRepo(BaseKRepo):
             for workspace_directory in all_workspaces[name]:
                 # Find files named "project.yml" or "project.yaml" starting from the workspace
                 for filepath in find_files_using_gitignore(
-                    ("project.yml", "project.yaml", "project_encrypted.yml",  "project_encrypted.yaml"),
+                    (
+                        "project.yml",
+                        "project.yaml",
+                        "project_encrypted.yml",
+                        "project_encrypted.yaml",
+                    ),
                     root=workspace_directory,
                 ):
                     # Create a new instance of KProject
@@ -513,7 +518,6 @@ class KRepo(BaseKRepo):
 
                         # Define function to perform install
                         async def install_project(project: KProject) -> None:
-                            nonlocal results
                             async with limiter:
                                 cmd = await project.install(
                                     exclude_groups=exclude_groups,
@@ -529,6 +533,7 @@ class KRepo(BaseKRepo):
                                     clean=False,
                                 )
                                 if cmd:
+                                    nonlocal results
                                     results.append(cmd)
 
                         # Kick off install
