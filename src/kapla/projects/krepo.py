@@ -609,7 +609,6 @@ class KRepo(BaseKRepo):
             ):
                 # Define function to perform install
                 async def build_project(project: KProject) -> None:
-                    nonlocal results
                     async with limiter:
                         cmd = await project.build(
                             env=env,
@@ -620,6 +619,7 @@ class KRepo(BaseKRepo):
                             clean=clean,
                             recurse=False,
                         )
+                        nonlocal results
                         results.append(cmd)
                         wheels = list(Path(project.root / "dist").glob("*.whl"))
                         logger.info(
