@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
+    DefaultDict,
     Dict,
     Iterable,
     Iterator,
@@ -27,6 +28,7 @@ from kapla.specs.kproject import KProjectSpec
 from kapla.specs.pyproject import (
     DEFAULT_BUILD_SYSTEM,
     Dependency,
+    DependencyMeta,
     Group,
     PoetryConfig,
     PyProjectSpec,
@@ -195,26 +197,34 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             constraints = defaultdict(lambda: "*")
         else:
             constraints = self.repo.get_packages_constraints()
+
+        def _process_dep_recursive(dep_name: str, visited: Set[str]) -> None:
+            if dep_name in visited:
+                return
+            visited.add(dep_name)
+            self._lock_and_store_dependencies(
+                lock_versions, dependencies, constraints, dep_name
+            )
+            if self.repo:
+                locked_package = self.repo.packages_lock.packages.get(dep_name)
+                if locked_package and locked_package.dependencies:
+                    for sub_dep in locked_package.dependencies:
+                        _process_dep_recursive(sub_dep, visited)
+
         # Iterate over dependencies and replace version
         for dep in self.spec.dependencies:
-            if isinstance(dep, str):
-                if lock_versions:
-                    locked_version = self.get_locked_version(dep)
-                else:
-                    locked_version = constraints.get(dep, "*")
-                dependencies[dep] = Dependency(version=locked_version)
-            else:
-                for key, value in dep.items():
-                    if lock_versions:
-                        locked_version = self.get_locked_version(key)
-                    else:
-                        locked_version = constraints.get(key, "*")
-                    dependencies[key] = Dependency.parse_obj(
-                        {
-                            **value.dict(exclude_unset=True, by_alias=True),
-                            "version": locked_version,
-                        }
-                    )
+            self._lock_and_store_dependencies(
+                lock_versions, dependencies, constraints, dep
+            )
+            local_dependencies = [dep] if isinstance(dep, str) else list(dep.keys())
+            if self.repo:
+                for dep_ in local_dependencies:
+                    locked_package = self.repo.packages_lock.packages.get(dep_)
+                    if locked_package and locked_package.dependencies:
+                        visited: Set[str] = set()
+                        for secondary_dep in locked_package.dependencies:
+                            _process_dep_recursive(secondary_dep, visited)
+
         # Iterate over extra dependencies and replace version
         for group_name, group_dependencies in self.spec.extras.items():
             # Let's create a group and an extra
@@ -282,6 +292,33 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 dependencies.pop(dep)
         # Return values
         return dependencies, extras, groups
+
+    def _lock_and_store_dependencies(
+        self,
+        lock_versions: bool,
+        dependencies: Dict[str, Dependency],
+        constraints: Union[DefaultDict[str, str], Dict[str, str]],
+        dep: Union[str, Dict[str, DependencyMeta]],
+    ) -> None:
+        if isinstance(dep, str):
+            if lock_versions:
+                locked_version = self.get_locked_version(dep)
+            else:
+                locked_version = constraints.get(dep, "*")
+
+            dependencies[dep] = Dependency(version=locked_version)
+        else:
+            for key, value in dep.items():
+                if lock_versions:
+                    locked_version = self.get_locked_version(key)
+                else:
+                    locked_version = constraints.get(key, "*")
+                dependencies[key] = Dependency.parse_obj(
+                    {
+                        **value.dict(exclude_unset=True, by_alias=True),
+                        "version": locked_version,
+                    }
+                )
 
     def get_locked_version(self, package: str) -> str:
         if self.repo:

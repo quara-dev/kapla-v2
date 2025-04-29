@@ -19,7 +19,7 @@ class BuildSystem(AliasedModel):
 
 
 class Package(AliasedModel):
-    """A package can be declared as a dictionnary.
+    """A package can be declared as a dictionary.
 
     References:
       *  <https://python-poetry.org/docs/pyproject/#packages>
