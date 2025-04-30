@@ -25,7 +25,6 @@ from pydantic import ValidationError
 
 from kapla.specs.common import BuildSystem
 from kapla.specs.kproject import KProjectSpec
-from kapla.specs.lock import LockedPackage
 from kapla.specs.pyproject import (
     DEFAULT_BUILD_SYSTEM,
     Dependency,
