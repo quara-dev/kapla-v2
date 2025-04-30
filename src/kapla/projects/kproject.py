@@ -25,6 +25,7 @@ from pydantic import ValidationError
 
 from kapla.specs.common import BuildSystem
 from kapla.specs.kproject import KProjectSpec
+from kapla.specs.lock import LockedPackage
 from kapla.specs.pyproject import (
     DEFAULT_BUILD_SYSTEM,
     Dependency,
@@ -240,12 +241,30 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
 
         for dep_name in local_dependencies:
             locked_package = self.repo.packages_lock.packages.get(dep_name)
-            if locked_package and locked_package.dependencies:
-                visited: Set[str] = set()
-                for secondary_dep in locked_package.dependencies:
-                    self._process_dependency_tree(
-                        secondary_dep, visited, dependencies, constraints, lock_versions
-                    )
+            if locked_package is None or locked_package.dependencies is None:
+                continue
+            visited: Set[str] = set()
+            for (
+                secondary_dep,
+                dep_meta_or_version,
+            ) in locked_package.dependencies.items():
+                self._process_dependency_tree(
+                    secondary_dep,
+                    visited,
+                    dependencies,
+                    constraints,
+                    lock_versions,
+                    self._create_dependency_meta(dep_meta_or_version),
+                )
+
+    def _create_dependency_meta(
+        self, dep_meta_or_version: Union[str, Dict[str, Any]]
+    ) -> None | DependencyMeta:
+        return (
+            None
+            if isinstance(dep_meta_or_version, str)
+            else DependencyMeta(**dep_meta_or_version)
+        )
 
     def _process_dependency_tree(
         self,
@@ -254,25 +273,36 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         dependencies: Dict[str, Dependency],
         constraints: Union[DefaultDict[str, str], Dict[str, str]],
         lock_versions: bool,
+        dep_meta: Optional[DependencyMeta] = None,
     ) -> None:
         """Process a dependency and its subdependencies recursively."""
         if dep_name in visited:
             return
         visited.add(dep_name)
 
-        self._lock_and_store_dependencies(
-            lock_versions, dependencies, constraints, dep_name
-        )
+        dep = dep_name if dep_meta is None else {dep_name: dep_meta}
+
+        self._lock_and_store_dependencies(lock_versions, dependencies, constraints, dep)
 
         if not self.repo:
             return
 
         locked_package = self.repo.packages_lock.packages.get(dep_name)
-        if locked_package and locked_package.dependencies:
-            for sub_dep in locked_package.dependencies:
-                self._process_dependency_tree(
-                    sub_dep, visited, dependencies, constraints, lock_versions
-                )
+        if locked_package is None or locked_package.dependencies is None:
+            return
+
+        for (
+            sub_dep_name,
+            sub_dep_meta_or_version,
+        ) in locked_package.dependencies.items():
+            self._process_dependency_tree(
+                sub_dep_name,
+                visited,
+                dependencies,
+                constraints,
+                lock_versions,
+                self._create_dependency_meta(sub_dep_meta_or_version),
+            )
 
     def _process_extras_and_groups(
         self,
