@@ -387,20 +387,29 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 else {"version": locked_version, "optional": True}
             )
             dependencies[dep_name] = Dependency.parse_obj(dep_dict)
-        if self.repo:
-            locked_package = self.repo.packages_lock.packages.get(dep_name)
-            if locked_package and locked_package.dependencies:
-                for sub_dep in locked_package.dependencies:
-                    self._add_dependency_to_group(
-                        sub_dep,
-                        group_name,
-                        dependencies,
-                        extras,
-                        groups,
-                        constraints,
-                        lock_versions,
-                        visited,
-                    )
+
+        if self.repo is None:
+            return
+
+        locked_package = self.repo.packages_lock.packages.get(dep_name)
+        if not locked_package or not locked_package.dependencies:
+            return
+
+        for (
+            sub_dep_name,
+            sub_dep_meta_or_version,
+        ) in locked_package.dependencies.items():
+            self._add_dependency_to_group(
+                sub_dep_name,
+                group_name,
+                dependencies,
+                extras,
+                groups,
+                constraints,
+                lock_versions,
+                visited,
+                self._create_dependency_meta(sub_dep_meta_or_version),
+            )
 
     def _handle_python_dependency(
         self,
