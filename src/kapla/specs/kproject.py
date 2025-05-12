@@ -8,6 +8,7 @@ from .pyproject import DependencyMeta
 class DockerImageSpec(AliasedModel):
     name: str
     template: Optional[str] = None
+    build_args: Optional[Dict[str, str]] = None # specific build_arg for this image
 
 
 class DockerSpec(AliasedModel):
