@@ -922,7 +922,8 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         **kwargs: Any,
     ) -> Command:
         cmd = Command("docker buildx build", deadline=deadline, quiet=quiet, **kwargs)
-        build_args = self._prepare_build_args(spec, git_infos, build_args, tag)
+        build_args = self._prepare_build_args(spec, image, git_infos, build_args, tag)
+        # add specific build arg for this image to build
         logger.warning("Using build args", build_args=build_args)
         for key, value in build_args.items():
             cmd.add_option("--build-arg", "=".join([key, value]), escape=True)
@@ -950,6 +951,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
     def _prepare_build_args(
         self,
         spec: DockerSpec,
+        image: DockerImageSpec,
         git_infos: GitInfos,
         build_args: Optional[Dict[str, str]],
         tag: str,
@@ -958,6 +960,9 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         if build_args:
             _build_args.update(build_args)
         build_args = _build_args.copy()
+        # add specific build args for this image
+        if image.build_args is not None:
+            build_args.update(image.build_args)
         if spec.base_image and "BASE_IMAGE" not in build_args:
             base_image = (
                 spec.base_image + ":" + tag
