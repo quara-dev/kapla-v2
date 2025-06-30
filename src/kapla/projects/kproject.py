@@ -880,7 +880,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                         deadline,
                         **kwargs,
                     )
-                logger.warning("Invoking docker command", command=cmd.cmd)
+                logger.info("Invoking docker command", command=cmd.cmd)
                 cmds.append(await cmd.run())
             finally:
                 Path(self.root, "Dockerfile").unlink(missing_ok=True)
