@@ -314,11 +314,16 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         for group_name, group_dependencies in self.spec.extras.items():
             groups[group_name] = Group(dependencies={})
             extras[group_name] = []
-            visited: Set[str] = set()
+            # A dependency can get added to dev group while still being in the in the main dependencies
+            # example: if it's a dependency of a dev dependency, or if it has been listed both as a main
+            # and a dev dependency by mistake. In that case, it will not be installed with the main dependencies.
+            # We add all the main dependencies to the visited set to avoid adding them again
+            visited: Set[str] = set(self.get_dependencies_names(include_extras=False))
             for dep in group_dependencies:
-                if isinstance(dep, str):
+                dep_items = [(dep, None)] if isinstance(dep, str) else dep.items()
+                for dep_name, value in dep_items:
                     self._add_dependency_to_group(
-                        dep,
+                        dep_name,
                         group_name,
                         dependencies,
                         extras,
@@ -326,20 +331,8 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                         constraints,
                         lock_versions,
                         visited,
+                        value,
                     )
-                else:
-                    for key, value in dep.items():
-                        self._add_dependency_to_group(
-                            key,
-                            group_name,
-                            dependencies,
-                            extras,
-                            groups,
-                            constraints,
-                            lock_versions,
-                            visited,
-                            value,
-                        )
 
     def _add_dependency_to_group(
         self,
