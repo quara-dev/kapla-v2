@@ -129,23 +129,29 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 return True
         return False
 
+    def _extract_dep_names(
+        self, dep: Union[str, Dict[str, DependencyMeta]]
+    ) -> List[str]:
+        """Extract dependency names from a dependency specification"""
+        return [dep] if isinstance(dep, str) else list(dep.keys())
+
+    def _collect_deps_from_list(
+        self, deps_list: List[Union[str, Dict[str, DependencyMeta]]]
+    ) -> Set[str]:
+        """Collect dependency names from a list of dependencies"""
+        names: Set[str] = set()
+        for dep in deps_list:
+            names.update(self._extract_dep_names(dep))
+        return names
+
     def get_dependencies_names(self, include_extras: bool = True) -> List[str]:
         """Get a list of dependencies names"""
-        names: Set[str] = set()
-        for dep in self.spec.dependencies:
-            if isinstance(dep, str):
-                names.add(dep)
-            else:
-                for name in dep:
-                    names.add(name)
+        names = self._collect_deps_from_list(self.spec.dependencies)
+
         if include_extras:
             for extra_deps in self.spec.extras.values():
-                for dep in extra_deps:
-                    if isinstance(dep, str):
-                        names.add(dep)
-                    else:
-                        for name in dep:
-                            names.add(name)
+                names.update(self._collect_deps_from_list(extra_deps))
+
         return list(names)
 
     def get_local_dependencies_names(self) -> List[str]:
@@ -165,7 +171,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             if name in self.repo.projects
         }
         _need_to_inspect = set(local_projects)
-        _inspected: Set[str] = set([self.name])
+        _inspected: Set[str] = {self.name}
         # For each local dependency
         while _need_to_inspect:
             local_dep = local_projects[_need_to_inspect.pop()]
@@ -186,6 +192,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         include_local: bool = True,
         include_python: bool = True,
         lock_versions: bool = True,
+        process_secondary_dependencies: bool = False,
     ) -> Tuple[Dict[str, Dependency], Dict[str, List[str]], Dict[str, Group]]:
         """Return dependencies, extras and groups"""
         dependencies: Dict[str, Dependency] = {}
@@ -198,9 +205,16 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         else:
             constraints = self.repo.get_packages_constraints()
 
-        self._process_main_dependencies(dependencies, constraints, lock_versions)
+        self._process_main_dependencies(
+            dependencies, constraints, lock_versions, process_secondary_dependencies
+        )
         self._process_extras_and_groups(
-            dependencies, extras, groups, constraints, lock_versions
+            dependencies,
+            extras,
+            groups,
+            constraints,
+            lock_versions,
+            process_secondary_dependencies,
         )
         self._handle_python_dependency(dependencies, include_python)
         self._remove_local_dependencies(dependencies, include_local)
@@ -211,21 +225,17 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         dependencies: Dict[str, Dependency],
         constraints: Union[DefaultDict[str, str], Dict[str, str]],
         lock_versions: bool,
+        process_secondary_dependencies: bool,
     ) -> None:
         for dep in self.spec.dependencies:
             self._lock_and_store_dependencies(
                 lock_versions, dependencies, constraints, dep
             )
-            local_dependencies = self._get_local_dependency_names(dep)
-            self._process_secondary_dependencies(
-                local_dependencies, dependencies, constraints, lock_versions
-            )
-
-    def _get_local_dependency_names(
-        self, dep: Union[str, Dict[str, DependencyMeta]]
-    ) -> List[str]:
-        """Extract dependency names from a dependency specification."""
-        return [dep] if isinstance(dep, str) else list(dep.keys())
+            local_dependencies = self._extract_dep_names(dep)
+            if process_secondary_dependencies:
+                self._process_secondary_dependencies(
+                    local_dependencies, dependencies, constraints, lock_versions
+                )
 
     def _process_secondary_dependencies(
         self,
@@ -310,6 +320,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         groups: Dict[str, Group],
         constraints: Union[DefaultDict[str, str], Dict[str, str]],
         lock_versions: bool,
+        process_secondary_dependencies: bool,
     ) -> None:
         for group_name, group_dependencies in self.spec.extras.items():
             groups[group_name] = Group(dependencies={})
@@ -330,6 +341,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                         groups,
                         constraints,
                         lock_versions,
+                        process_secondary_dependencies,
                         visited,
                         value,
                     )
@@ -343,6 +355,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         groups: Dict[str, Group],
         constraints: Union[DefaultDict[str, str], Dict[str, str]],
         lock_versions: bool,
+        process_secondary_dependencies: bool,
         visited: Optional[Set[str]] = None,
         value: Optional[DependencyMeta] = None,
     ) -> None:
@@ -380,6 +393,8 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 else {"version": locked_version, "optional": True}
             )
             dependencies[dep_name] = Dependency.parse_obj(dep_dict)
+        if not process_secondary_dependencies:
+            return
 
         if self.repo is None:
             return
@@ -400,6 +415,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 groups,
                 constraints,
                 lock_versions,
+                process_secondary_dependencies,
                 visited,
                 self._create_dependency_meta(sub_dep_meta_or_version),
             )
@@ -463,10 +479,12 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         self,
         lock_versions: bool = True,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        process_secondary_dependencies: bool = False,
     ) -> PyProjectSpec:
         """Create content of pyproject.toml file according to project.yaml"""
         dependencies, extras, groups = self.get_build_dependencies(
-            lock_versions=lock_versions
+            lock_versions=lock_versions,
+            process_secondary_dependencies=process_secondary_dependencies,
         )
         # Gather raw tool.poetry configuration byt exclude dependencies, extras and group fields
         raw_poetry_config = self.spec.dict(
@@ -491,13 +509,16 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         path: Union[str, Path, None] = None,
         lock_versions: bool = True,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        process_secondary_dependencies: bool = False,
     ) -> KPyProject:
         """Write auto-generated pyproject.toml file.
 
         If path argument is not specified, file is generated in the project directory by default.
         """
         spec = self.get_pyproject_spec(
-            lock_versions=lock_versions, build_system=build_system
+            lock_versions=lock_versions,
+            build_system=build_system,
+            process_secondary_dependencies=process_secondary_dependencies,
         )
         pyproject_path = Path(path) if path else self.pyproject_path
         content = spec.dict()
@@ -541,10 +562,14 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         lock_versions: bool = True,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
         clean: bool = True,
+        process_secondary_dependencies: bool = False,
     ) -> Iterator[KPyProject]:
         """A context manager which ensures pyproject.toml is written to disk within context and removed out of context"""
         pyproject = self.write_pyproject(
-            path, lock_versions=lock_versions, build_system=build_system
+            path,
+            lock_versions=lock_versions,
+            build_system=build_system,
+            process_secondary_dependencies=process_secondary_dependencies,
         )
         try:
             yield pyproject
@@ -564,6 +589,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
         recurse: bool = True,
+        process_secondary_dependencies: bool = False,
         **kwargs: Any,
     ) -> Command:
         if recurse and self.repo:
@@ -577,6 +603,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                             build_system=build_system,
                             lock_versions=lock_versions,
                             recurse=False,
+                            process_secondary_dependencies=process_secondary_dependencies,
                         )
                     )
         if clear_dist:
@@ -586,6 +613,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             lock_versions=lock_versions,
             build_system=build_system,
             clean=clean,
+            process_secondary_dependencies=process_secondary_dependencies,
         ) as pyproject:
             return await pyproject.poetry_build(
                 env=env,
@@ -871,6 +899,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                         build_dist_system,
                         lock_versions,
                         deadline,
+                        True,
                         **kwargs,
                     )
                 logger.info("Invoking docker command", command=cmd.cmd)
@@ -1029,6 +1058,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         build_dist_system: BuildSystem,
         lock_versions: bool,
         deadline: Optional[float],
+        process_secondary_dependencies: bool,
         **kwargs: Any,
     ) -> None:
         await self.build(
@@ -1037,6 +1067,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             lock_versions=lock_versions,
             quiet=True,
             deadline=deadline,
+            process_secondary_dependencies=process_secondary_dependencies,
             **kwargs,
         )
         dist_root = self.root / "dist"
