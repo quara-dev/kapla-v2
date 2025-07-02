@@ -333,7 +333,7 @@ class KRepo(BaseKRepo):
         zombie_deps: Dict[str, Dict[str, None]] = defaultdict(dict)
 
         for project_name in self.projects:
-            deps_summary = self.get_single_project_dependencies(project_name)
+            deps_summary = self.get_single_project_dependencies(project_name, False)
 
             # Iterate over groups
             for group_name, group_deps in deps_summary.groups.items():
@@ -448,7 +448,7 @@ class KRepo(BaseKRepo):
                 await self.poetry_add(
                     *packages,
                     group=group,
-                    lock=True,
+                    lock=False,
                 )
 
     async def remove_zombie_dependencies(self) -> None:
@@ -591,6 +591,7 @@ class KRepo(BaseKRepo):
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
         clean: bool = True,
+        process_secondary_dependencies: bool = False,
     ) -> List[Command]:
         # Compute deadline to use to enforce timeouts
         deadline = get_deadline(timeout, deadline)
@@ -617,6 +618,7 @@ class KRepo(BaseKRepo):
                             raise_on_error=True,
                             clean=clean,
                             recurse=False,
+                            process_secondary_dependencies=process_secondary_dependencies,
                         )
                         results.append(cmd)
                         wheels = list(Path(project.root / "dist").glob("*.whl"))

@@ -93,7 +93,7 @@ class PyProjectSpec(BasePyProjectSpec):
 
 
 DEFAULT_BUILD_SYSTEM = BuildSystem(
-    build_backend="poetry.core.masonry.api",  # pyright: ignore[reportGeneralTypeIssues]
+    build_backend="poetry.core.masonry.api",  # pyright: ignore[reportCallIssue]
     requires=[
         "poetry-core>=1.2.0",
     ],

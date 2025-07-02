@@ -30,6 +30,14 @@ def set_build_parser(parser: _SubParsersAction[Any], parent: ArgumentParser) -> 
     build_parser.add_argument(
         "-l", "--lock", action="store_true", default=False, dest="lock_versions"
     )
+    build_parser.add_argument(
+        "--process-secondary",
+        action="store_true",
+        default=False,
+        dest="process_secondary_dependencies",
+        help="If true, all the dependencies of the dependencies will be added to the toml as well. "
+        "Useful to enforce a global lock to sub-projects in a mono repo .",
+    )
 
 
 def do_build(args: Any) -> None:
@@ -39,6 +47,7 @@ def do_build(args: Any) -> None:
     include_projects: Optional[Tuple[str]] = args.projects or None
     exclude_projects: Optional[Tuple[str]] = args.exclude_projects or None
     lock_versions: bool = args.lock_versions
+    process_secondary_dependencies: bool = args.process_secondary_dependencies
     clean: bool = not args.no_clean
 
     # Find repo
@@ -51,6 +60,7 @@ def do_build(args: Any) -> None:
         exclude_projects=list(exclude_projects) if exclude_projects else [],
         lock_versions=lock_versions,
         clean=clean,
+        process_secondary_dependencies=process_secondary_dependencies,
     )
 
     # Run build
